@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Southeast Texas Land and Water</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%97%BA%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<style>
+  :root {
+    --bg: #f4f2ec;
+    --panel: #ffffff;
+    --ink: #1f2522;
+    --muted: #5d6660;
+    --line: #dcd8cd;
+    --accent: #1d5e3a;
+    --ok: #2e7d4f;
+    --warn: #a15c00;
+    --err: #b3261e;
+    --err-bg: #fdecea;
+    --shadow: 0 2px 14px rgba(0,0,0,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151816; --panel: #1f2421; --ink: #e8ebe8; --muted: #a3aca6;
+      --line: #353c38; --accent: #7cc59a; --ok: #6cc28f; --warn: #e3a54a;
+      --err: #ff8a80; --err-bg: #3a1f1d; --shadow: 0 2px 14px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151816; --panel: #1f2421; --ink: #e8ebe8; --muted: #a3aca6;
+    --line: #353c38; --accent: #7cc59a; --ok: #6cc28f; --warn: #e3a54a;
+    --err: #ff8a80; --err-bg: #3a1f1d; --shadow: 0 2px 14px rgba(0,0,0,.5);
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  #map { position: absolute; inset: 0; background: #f7f7f4; }
+
+  /* Control panel */
+  #panel {
+    position: absolute; top: 12px; right: 12px; z-index: 1000;
+    width: 300px; max-height: calc(100% - 24px); overflow-y: auto;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+  }
+  #panel header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: var(--panel); z-index: 1;
+  }
+  #panel h1 { font-size: 15px; margin: 0; font-weight: 650; }
+  #panel h1 small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+  #toggle-panel, #reset-view {
+    border: 1px solid var(--line); background: transparent; color: var(--ink);
+    border-radius: 6px; padding: 4px 8px; cursor: pointer; font: inherit; font-size: 12px;
+  }
+  #panel.collapsed .body { display: none; }
+  #panel .body { padding: 4px 14px 12px; }
+  #panel h2 {
+    font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); margin: 14px 0 6px; font-weight: 600;
+  }
+  .row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .row label { flex: 1; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .row input[type=checkbox], .row input[type=radio] { accent-color: var(--accent); margin: 0; }
+  .status { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .status.ok { color: var(--ok); }
+  .status.loading { color: var(--warn); }
+  .status.err { color: var(--err); font-weight: 600; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 4px 22px; }
+  .slider { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px 22px; }
+  .slider input { flex: 1; accent-color: var(--accent); }
+  .slider output { width: 36px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
+
+  details { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 4px; }
+  summary { cursor: pointer; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+            color: var(--muted); font-weight: 600; padding: 6px 0; }
+  .legend { list-style: none; margin: 0; padding: 0; }
+  .legend li { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 12.5px; }
+  .swatch { width: 16px; height: 12px; border: 1px solid rgba(0,0,0,.25); flex: none; border-radius: 2px; }
+  .legend img { width: 20px; height: 20px; flex: none; }
+  .legend .code { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; }
+  .source { font-size: 11.5px; color: var(--muted); word-break: break-all; margin: 4px 0; }
+  .source code { font-size: 11px; }
+
+  /* Error banner */
+  #errors {
+    position: absolute; left: 12px; bottom: 28px; z-index: 1000;
+    max-width: min(460px, calc(100% - 24px));
+    display: none; flex-direction: column; gap: 6px;
+  }
+  #errors.show { display: flex; }
+  .err-item {
+    background: var(--err-bg); color: var(--err); border: 1px solid var(--err);
+    border-radius: 8px; padding: 8px 32px 8px 10px; box-shadow: var(--shadow);
+    position: relative; font-size: 13px;
+  }
+  .err-item strong { display: block; }
+  .err-item span { color: var(--ink); opacity: .85; font-size: 12px; word-break: break-word; }
+  .err-item button {
+    position: absolute; top: 4px; right: 4px; border: 0; background: transparent;
+    color: var(--err); font-size: 16px; cursor: pointer; line-height: 1; padding: 4px;
+  }
+
+  /* Map labels and markers */
+  .county-label {
+    background: transparent; border: 0; box-shadow: none;
+    font-weight: 700; font-size: 13px; letter-spacing: .08em; text-transform: uppercase;
+    color: #2b2b2b; white-space: nowrap;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff;
+  }
+  .county-label::before { display: none; }
+  .gauge-icon {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #0b5cad; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,.5);
+    box-sizing: border-box;
+  }
+  .gauge-label {
+    background: #0b5cad; color: #fff; border: 0; font-weight: 700; font-size: 12px;
+    padding: 2px 6px; box-shadow: 0 1px 4px rgba(0,0,0,.4);
+  }
+  .gauge-label::before { border-right-color: #0b5cad !important; }
+  .leaflet-popup-content { font-size: 13px; }
+  .leaflet-popup-content h3 { margin: 0 0 4px; font-size: 14px; }
+  .leaflet-popup-content table { border-collapse: collapse; margin: 6px 0; }
+  .leaflet-popup-content td { padding: 1px 8px 1px 0; vertical-align: top; }
+  .leaflet-popup-content td:first-child { color: #666; }
+
+  .rain-readout {
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; box-shadow: var(--shadow);
+    font-size: 13px; font-variant-numeric: tabular-nums; min-width: 190px;
+  }
+  .rain-readout b { font-size: 15px; }
+  .rain-readout small { display: block; color: var(--muted); font-size: 11px; }
+
+  .dot {
+    width: 12px; height: 12px; border-radius: 50%; flex: none; margin: 0 2px;
+    background: #c9284f; border: 1px solid rgba(42,42,42,.85);
+  }
+  .total-label {
+    background: rgba(255,255,255,.92); color: #1b1b1b; border: 1px solid #555;
+    border-radius: 3px; padding: 0 3px; font-size: 11px; font-weight: 700;
+    box-shadow: none; font-variant-numeric: tabular-nums; line-height: 1.35;
+  }
+  .total-label::before { display: none; }
+  .hide-total-labels .total-label { display: none; }
+
+  #fatal {
+    display: none; position: absolute; inset: 0; z-index: 2000; padding: 40px 16px;
+    background: var(--bg); color: var(--ink); text-align: center;
+  }
+
+  @media (max-width: 640px) {
+    #panel { left: 8px; right: 8px; top: 8px; width: auto; max-height: 60%; }
+    #errors { left: 8px; right: 8px; bottom: 24px; max-width: none; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="fatal"></div>
+
+<aside id="panel">
+  <header>
+    <h1>Southeast Texas<small>Hardin · Jefferson · Orange · Tyler · Polk counties</small></h1>
+    <div style="display:flex;gap:6px">
+      <button id="reset-view" type="button" title="Zoom back to the five counties">Reset view</button>
+      <button id="toggle-panel" type="button" aria-expanded="true">Hide</button>
+    </div>
+  </header>
+  <div class="body">
+    <h2>Basemap</h2>
+    <div class="row"><label><input type="radio" name="basemap" value="none" checked> Blank</label><span class="status" data-status="base-none"></span></div>
+    <div class="row"><label><input type="radio" name="basemap" value="plain"> Plain light (Esri)</label><span class="status" data-status="base-plain"></span></div>
+    <div class="row"><label><input type="radio" name="basemap" value="topo"> Topographic (USGS)</label><span class="status" data-status="base-topo"></span></div>
+    <div class="row"><label><input type="radio" name="basemap" value="imagery"> Aerial imagery (USGS)</label><span class="status" data-status="base-imagery"></span></div>
+
+    <h2>Layers</h2>
+    <div class="row"><label><input type="checkbox" data-layer="counties" checked> County boundaries</label><span class="status" data-status="counties"></span></div>
+    <div class="row"><label><input type="checkbox" data-layer="bith" checked> Big Thicket National Preserve</label><span class="status" data-status="bith"></span></div>
+    <div class="row"><label><input type="checkbox" data-layer="nhd" checked> Rivers &amp; streams (NHD)</label><span class="status" data-status="nhd"></span></div>
+    <div class="row"><label><input type="checkbox" data-layer="gauge" checked> Gauge KOUT2</label><span class="status" data-status="gauge"></span></div>
+    <div class="row"><label><input type="checkbox" data-layer="totals" checked> NWS gauge storm totals</label><span class="status" data-status="totals"></span></div>
+    <p class="hint">Full storm totals; numbers appear when you zoom in</p>
+    <div class="row"><label><input type="checkbox" data-layer="rain" checked> Edouard storm total rainfall</label><span class="status" data-status="rain"></span></div>
+    <p class="hint">MRMS radar estimate, 7 AM CDT Aug 31 – 7 AM CDT Sep 4, 2026</p>
+    <div class="slider">
+      <input id="rain-opacity" type="range" min="0" max="100" value="50" aria-label="Rainfall opacity">
+      <output id="rain-opacity-out" for="rain-opacity">50%</output>
+    </div>
+    <div class="row"><label><input type="checkbox" data-layer="nlcd" checked> NLCD 2021 land cover</label><span class="status" data-status="nlcd"></span></div>
+    <div class="row" style="margin-left:22px"><label><input type="radio" name="nlcd-mode" value="dev" checked> Developed vs undeveloped</label></div>
+    <div class="row" style="margin-left:22px"><label><input type="radio" name="nlcd-mode" value="all"> All 17 classes</label></div>
+    <div class="slider">
+      <input id="nlcd-opacity" type="range" min="0" max="100" value="60" aria-label="Land cover opacity">
+      <output id="nlcd-opacity-out" for="nlcd-opacity">60%</output>
+    </div>
+
+    <details open>
+      <summary>Storm total rainfall (inches)</summary>
+      <ul class="legend" id="rain-legend"></ul>
+      <ul class="legend" style="margin-top:6px">
+        <li><span class="dot"></span><span>NWS gauge storm total, same color scale</span></li>
+      </ul>
+      <p class="source">Point at the map to read the radar estimate. The archive tops out at 19.5 in, so the darkest class is open-ended. The highest gauge total in these counties was 24.36 in, at Little Pine Island Bayou at SH 787 in Hardin County.</p>
+    </details>
+
+    <details open>
+      <summary>Land cover legend</summary>
+      <ul class="legend" id="nlcd-legend"></ul>
+      <p class="source">Classes that only occur in Alaska (51, 72–74) are left out.</p>
+    </details>
+
+    <details>
+      <summary>Rivers &amp; streams legend</summary>
+      <ul class="legend" id="nhd-legend">
+        <li><span class="swatch" style="background:#5ba7d9;height:3px;border:0"></span><span>Streams and rivers</span></li>
+        <li><span class="swatch" style="background:#a8d3e8"></span><span>Lakes, ponds and reservoirs</span></li>
+      </ul>
+      <p class="source">USGS's cached cartographic rendering of the NHD: one style at every zoom, with smaller tributaries appearing as you zoom in.</p>
+    </details>
+
+    <details>
+      <summary>Map features</summary>
+      <ul class="legend">
+        <li><span class="swatch" style="background:transparent;border:2px solid #222"></span> County boundary</li>
+        <li><span class="swatch" style="background:rgba(0,90,30,.25);border:2px solid #00501e"></span> Big Thicket National Preserve</li>
+        <li><span class="swatch" style="background:#0b5cad;border-radius:50%;width:12px;border:2px solid #fff;box-shadow:0 0 0 1px #0b5cad"></span> USGS/NOAA stream gauge</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary>Data sources</summary>
+      <p class="source"><b>Land cover:</b> WMS layer <code>NLCD_2021_Land_Cover_L48</code> at <code>https://www.mrlc.gov/geoserver/mrlc_display/wms</code> (MRLC). The developed / undeveloped view reads each tile’s NLCD class colours back and groups codes 21–24 against everything else; no reclassified dataset is involved.</p>
+      <p class="source"><b>Rainfall:</b> NWS MRMS radar-only QPE from the Iowa Environmental Mesonet archive tile service <code>https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/</code>, layers <code>mrms::p72h-202609041200</code> + <code>mrms::p24h-202609011200</code>, decoded with IEM’s mrms_p72h / mrms_p24h value table. Window matches the NWS Lake Charles Edouard storm-total summary (issued 9:09 AM CDT Sep 4).</p>
+      <p class="source"><b>Gauge totals:</b> NWS post-storm reports for Tropical Storm Edouard, from the two offices that cover this area — Lake Charles (issued 2:10 PM CDT Sep 8, 2026, <code>PSHLCH_2026AL05_Edouard_Rainfall.csv</code>) for Hardin, Jefferson, Orange and Tyler, and Houston/Galveston (issued 11:45 AM CDT Sep 4, 2026, <code>PSHHGX_2026AL05_Edouard_Rainfall.csv</code>) for Polk. All 128 stations are full storm totals, none flagged incomplete or estimated. The NWS notes the data are preliminary and subject to correction.</p>
+      <p class="source"><b>Big Thicket:</b> NPS Land Resources Division boundary service, <code>UNIT_CODE = 'BITH'</code></p>
+      <p class="source"><b>Rivers:</b> <code>https://basemap.nationalmap.gov/arcgis/rest/services/USGSHydroCached/MapServer</code> — USGS's cached rendering of the National Hydrography Dataset.</p>
+      <p class="source"><b>Counties:</b> U.S. Census Bureau TIGERweb, State_County layer 1</p>
+      <p class="source"><b>Gauge:</b> NOAA National Water Prediction Service (KOUT2) / USGS 08041500</p>
+      <p class="source"><b>Basemaps:</b> USGS The National Map (topographic, aerial); Esri World Light Gray Canvas (plain). Blank draws no basemap at all.</p>
+    </details>
+  </div>
+</aside>
+
+<div id="errors" role="alert" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Fail loudly if Leaflet itself did not load ----------
+  if (typeof L === 'undefined') {
+    const f = document.getElementById('fatal');
+    f.style.display = 'block';
+    f.innerHTML = '<h2>The map library did not load</h2><p>Leaflet 1.9.4 could not be fetched from unpkg.com. ' +
+      'Check your internet connection, then reload this page.</p>';
+    return;
+  }
+
+  // ---------- Error + status reporting ----------
+  const errorBox = document.getElementById('errors');
+  const shownErrors = new Map();
+
+  function reportError(key, title, detail) {
+    let el = shownErrors.get(key);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'err-item';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('aria-label', 'Dismiss');
+      btn.textContent = '×';
+      btn.onclick = () => { el.remove(); shownErrors.delete(key); syncErrorBox(); };
+      el.append(document.createElement('strong'), document.createElement('span'), btn);
+      errorBox.appendChild(el);
+      shownErrors.set(key, el);
+    }
+    el.querySelector('strong').textContent = title;
+    el.querySelector('span').textContent = detail || '';
+    syncErrorBox();
+    console.error('[map] ' + title + (detail ? ' — ' + detail : ''));
+  }
+  function clearError(key) {
+    const el = shownErrors.get(key);
+    if (el) { el.remove(); shownErrors.delete(key); syncErrorBox(); }
+  }
+  function syncErrorBox() { errorBox.classList.toggle('show', shownErrors.size > 0); }
+
+  function setStatus(key, state, text) {
+    document.querySelectorAll('[data-status="' + key + '"]').forEach(s => {
+      s.className = 'status ' + (state || '');
+      s.textContent = text || '';
+    });
+  }
+
+  async function fetchJSON(url, label) {
+    let resp;
+    try {
+      resp = await fetch(url);
+    } catch (e) {
+      throw new Error('No response from server (network error or blocked request).');
+    }
+    if (!resp.ok) throw new Error('Server returned HTTP ' + resp.status + (resp.statusText ? ' ' + resp.statusText : '') + '.');
+    let data;
+    try { data = await resp.json(); }
+    catch (e) { throw new Error('Server response was not valid JSON.'); }
+    // ArcGIS REST reports errors inside a 200 response.
+    if (data && data.error) {
+      throw new Error('Service error ' + (data.error.code || '') + ': ' + (data.error.message || 'unknown') +
+        (data.error.details && data.error.details.length ? ' (' + data.error.details.join('; ') + ')' : ''));
+    }
+    return data;
+  }
+
+  // Watch a tile layer: count failed tiles and report them by layer name.
+  function watchTiles(layer, key, name) {
+    let failed = 0, loaded = 0, timer = null;
+    layer.on('loading', () => { failed = 0; loaded = 0; setStatus(key, 'loading', 'loading…'); });
+    layer.on('tileload', () => { loaded++; });
+    layer.on('tileerror', () => {
+      failed++;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        reportError(key, name + ' failed to load',
+          failed + ' map tile' + (failed === 1 ? '' : 's') + ' could not be loaded from the server' +
+          (loaded ? ' (' + loaded + ' loaded fine).' : '. The service may be down or unreachable.'));
+        setStatus(key, 'err', 'error');
+      }, 400);
+    });
+    layer.on('load', () => {
+      if (failed === 0) { setStatus(key, 'ok', 'loaded'); clearError(key); }
+      else setStatus(key, 'err', failed + ' failed');
+    });
+  }
+
+  // ---------- Map ----------
+  const map = L.map('map', { zoomControl: true, minZoom: 6, maxZoom: 18 });
+  // Approximate extent of Hardin, Jefferson, Orange, Tyler and Polk counties; refined once counties load.
+  map.fitBounds([[29.55, -95.25], [31.15, -93.70]]);
+
+  // Zoom to the counties, keeping clear of the panel on wide screens. Leaflet cannot compute a
+  // sensible zoom while the map element has no size (a hidden tab, a window still opening), so
+  // the fit is retried once the container has real dimensions.
+  let homeBounds = L.latLngBounds([[29.55, -95.25], [31.15, -93.70]]);
+  let fitted = false;
+  function fitHome() {
+    const size = map.getSize();
+    if (size.x < 120 || size.y < 120) return false;          // too small to fit against
+    const room = size.x > 700 ? [330, 20] : [20, 20];         // leave space for the panel
+    map.fitBounds(homeBounds, { paddingTopLeft: [20, 20], paddingBottomRight: room });
+    fitted = true;
+    return true;
+  }
+  // Refit while the window is still settling, but never after the reader has moved the map.
+  let userMoved = false;
+  map.on('dragstart zoomstart', () => { userMoved = true; });
+  map.on('resize', () => { if (!userMoved) fitHome(); });
+  L.control.scale({ imperial: true, metric: true, position: 'bottomright' }).addTo(map);
+
+  // Pane order: basemap < land cover < rainfall < preserve < rivers < counties < gauge
+  map.createPane('nlcd').style.zIndex = 250;
+  map.createPane('rain').style.zIndex = 300;
+  map.createPane('bith').style.zIndex = 400;
+  map.createPane('nhd').style.zIndex = 420;
+  map.createPane('counties').style.zIndex = 440;
+  map.createPane('countyLabels').style.zIndex = 640;
+  map.createPane('totals').style.zIndex = 610;
+  map.getPane('countyLabels').style.pointerEvents = 'none';
+
+  // ---------- Basemaps ----------
+  const usgsAttr = 'Basemap: <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">USGS The National Map</a>';
+  const esriAttr = 'Basemap: <a href="https://www.esri.com/">Esri</a>, HERE, Garmin, &copy; OpenStreetMap contributors';
+  const basemaps = {
+    none: null,   // blank ground, so only the data layers carry the map
+    plain: L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 18, maxNativeZoom: 16, attribution: esriAttr }),
+    topo: L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 18, maxNativeZoom: 16, attribution: usgsAttr }),
+    imagery: L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 18, maxNativeZoom: 16, attribution: usgsAttr })
+  };
+  watchTiles(basemaps.plain, 'base-plain', 'Plain light basemap');
+  watchTiles(basemaps.topo, 'base-topo', 'Topographic basemap');
+  watchTiles(basemaps.imagery, 'base-imagery', 'Aerial imagery basemap');
+  let currentBaseKey = 'none';
+  let currentBase = null;
+  setStatus('base-none', 'ok', 'no basemap');
+
+  document.querySelectorAll('input[name="basemap"]').forEach(r => {
+    r.addEventListener('change', () => {
+      if (!r.checked) return;
+      if (currentBase) map.removeLayer(currentBase);
+      setStatus('base-' + currentBaseKey, '', '');
+      clearError('base-' + currentBaseKey);
+      currentBaseKey = r.value;
+      currentBase = basemaps[r.value];
+      if (currentBase) currentBase.addTo(map);
+      else setStatus('base-none', 'ok', 'no basemap');
+    });
+  });
+
+  // ---------- NLCD land cover (WMS) ----------
+  // Layer name taken from the MRLC GetCapabilities document for the mrlc_display workspace.
+  const NLCD_WMS_URL = 'https://www.mrlc.gov/geoserver/mrlc_display/wms';
+  const NLCD_LAYER = 'NLCD_2021_Land_Cover_L48';
+
+  // The WMS paints one exact colour per NLCD class, so each tile can be read back pixel by pixel and
+  // repainted. That is what makes the developed / undeveloped view possible without a second service:
+  // it is the same published raster, grouped into two classes on the way to the screen.
+  const DEVELOPED_CODES = new Set([21, 22, 23, 24]);
+  const DEV_COLOR = [74, 74, 82];        // built-up
+  const UNDEV_COLOR = [223, 232, 219];   // everything else
+  let nlcdMode = 'dev';
+
+  const NlcdLayer = L.GridLayer.extend({
+    createTile: function (coords, done) {
+      const size = this.getTileSize();
+      const canvas = L.DomUtil.create('canvas', 'leaflet-tile');
+      canvas.width = size.x; canvas.height = size.y;
+      const WM = 20037508.342789244, s = (2 * WM) / Math.pow(2, coords.z);
+      const minx = -WM + coords.x * s, maxy = WM - coords.y * s;
+      const params = new URLSearchParams({
+        SERVICE: 'WMS', VERSION: '1.3.0', REQUEST: 'GetMap', LAYERS: NLCD_LAYER, STYLES: '',
+        CRS: 'EPSG:3857', BBOX: [minx, maxy - s, minx + s, maxy].join(','),
+        WIDTH: String(size.x), HEIGHT: String(size.y), FORMAT: 'image/png', TRANSPARENT: 'true'
+      });
+      loadImage(NLCD_WMS_URL + '?' + params.toString())
+        .then(img => {
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(img, 0, 0, size.x, size.y);
+          if (nlcdMode !== 'all') {
+            const d = ctx.getImageData(0, 0, size.x, size.y), px = d.data;
+            for (let k = 0; k < px.length; k += 4) {
+              if (px[k + 3] === 0) continue;
+              const code = NLCD_BY_COLOR.get((px[k] << 16) | (px[k + 1] << 8) | px[k + 2]);
+              if (code === undefined) { px[k + 3] = 0; continue; }   // colour not in the table: draw nothing
+              const c = DEVELOPED_CODES.has(code) ? DEV_COLOR : UNDEV_COLOR;
+              px[k] = c[0]; px[k + 1] = c[1]; px[k + 2] = c[2]; px[k + 3] = 255;
+            }
+            ctx.putImageData(d, 0, 0);
+          }
+          done(null, canvas);
+        })
+        .catch(err => done(err, canvas));
+      return canvas;
+    }
+  });
+  const nlcd = new NlcdLayer({
+    pane: 'nlcd', opacity: 0.6, maxNativeZoom: 16, maxZoom: 18,
+    attribution: 'Land cover: <a href="https://www.mrlc.gov/">MRLC NLCD 2021</a>'
+  });
+  watchTiles(nlcd, 'nlcd', 'NLCD land cover');
+
+  // Confirm at load time that the layer is still advertised by the service.
+  (async function checkNlcdCapabilities() {
+    const capUrl = 'https://www.mrlc.gov/geoserver/mrlc_display/' + NLCD_LAYER +
+      '/ows?service=WMS&version=1.3.0&request=GetCapabilities';
+    try {
+      const resp = await fetch(capUrl);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const xml = new DOMParser().parseFromString(await resp.text(), 'application/xml');
+      const names = Array.from(xml.getElementsByTagName('Name')).map(n => n.textContent.trim());
+      if (!names.includes(NLCD_LAYER)) {
+        reportError('nlcd-cap', 'NLCD land cover layer no longer listed',
+          'The MRLC GetCapabilities response does not list "' + NLCD_LAYER + '". The service may have renamed or retired it.');
+      }
+    } catch (e) {
+      reportError('nlcd-cap', 'NLCD land cover: could not read GetCapabilities',
+        'Could not confirm the layer with MRLC (' + e.message + '). Tiles may still draw.');
+    }
+  })();
+
+  const NLCD_CLASSES = [
+    [11, '#476BA0', 'Open Water'],
+    [12, '#D1DDF9', 'Perennial Ice/Snow'],
+    [21, '#DDC9C9', 'Developed, Open Space'],
+    [22, '#D89382', 'Developed, Low Intensity'],
+    [23, '#ED0000', 'Developed, Medium Intensity'],
+    [24, '#AA0000', 'Developed, High Intensity'],
+    [31, '#B2ADA3', 'Barren Land (Rock/Sand/Clay)'],
+    [32, '#F9F9F9', 'Unconsolidated Shore'],
+    [41, '#68AA63', 'Deciduous Forest'],
+    [42, '#1C6330', 'Evergreen Forest'],
+    [43, '#B5C98E', 'Mixed Forest'],
+    [52, '#CCBA7C', 'Shrub/Scrub'],
+    [71, '#E2E2C1', 'Grassland/Herbaceous'],
+    [81, '#DBD83D', 'Pasture/Hay'],
+    [82, '#AA7028', 'Cultivated Crops'],
+    [90, '#BAD8EA', 'Woody Wetlands'],
+    [95, '#70A3BA', 'Emergent Herbaceous Wetlands']
+  ];
+  const NLCD_BY_COLOR = new Map(NLCD_CLASSES.map(([code, color]) => [parseInt(color.slice(1), 16), code]));
+  const rgbOf = c => 'rgb(' + c.join(',') + ')';
+
+  const nlcdLegend = document.getElementById('nlcd-legend');
+  function drawNlcdLegend() {
+    nlcdLegend.innerHTML = '';
+    const add = (color, label, code) => {
+      const li = document.createElement('li');
+      li.innerHTML = '<span class="swatch" style="background:' + color + '"></span><span></span>' +
+        (code ? '<span class="code">' + code + '</span>' : '');
+      li.children[1].textContent = label;
+      nlcdLegend.appendChild(li);
+    };
+    if (nlcdMode === 'all') {
+      NLCD_CLASSES.forEach(([code, color, label]) => add(color, label, code));
+    } else {
+      add(rgbOf(DEV_COLOR), 'Developed', '21–24');
+      add(rgbOf(UNDEV_COLOR), 'Undeveloped — forest, wetland, pasture, crops, water', '');
+    }
+  }
+  drawNlcdLegend();
+
+  document.querySelectorAll('input[name="nlcd-mode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      if (!r.checked) return;
+      nlcdMode = r.value;
+      drawNlcdLegend();
+      nlcd.redraw();
+    });
+  });
+
+  const slider = document.getElementById('nlcd-opacity');
+  const sliderOut = document.getElementById('nlcd-opacity-out');
+  slider.addEventListener('input', () => {
+    nlcd.setOpacity(slider.value / 100);
+    sliderOut.textContent = slider.value + '%';
+  });
+
+  // ---------- Tropical Storm Edouard storm total rainfall (MRMS QPE via IEM) ----------
+  // NOAA's own QPE services (mapservices.weather.noaa.gov obs/rfc_qpe, obs/mrms_qpe) only offer rolling
+  // windows ending "now", so they cannot show a past storm. IEM archives the same NWS MRMS radar-only QPE
+  // hourly since 2015 and serves it through its tile cache as mrms::p{1,24,48,72}h-YYYYMMDDHHMI (UTC, end time).
+  // Storm window = NWS Lake Charles storm total summary: 7 AM CDT Mon Aug 31 -> 7 AM CDT Fri Sep 4 (12Z-12Z),
+  // built as the 72 h total ending Sep 4 12Z plus the 24 h total ending Sep 1 12Z.
+  const IEM_TILES = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
+  const RAIN_PARTS = ['mrms::p72h-202609041200', 'mrms::p24h-202609011200'];
+  const RAIN_CAP_MM = 495;   // highest value in IEM's MRMS color table; anything at the cap is "at least"
+
+  // Tile colors -> millimeters, from IEM's published lookup table for mrms_p72h / mrms_p24h
+  // (https://mesonet.agron.iastate.edu/GIS/rasters.php?rid=8). Index i has value
+  // 0.25*i mm (1-100), 25 + 1.25*(i-100) mm (101-180), 125 + 5*(i-180) mm (181-254).
+  const RAIN_LUT_HEX =
+    '0000000000000000000018ff001eff0024ff002aff0030ff0036ff003cff0042ff0048ff004eff0054ff005aff0060ff0066ff006cff0072ff0078ff' +
+    '007eff0084ff008aff0090ff0096ff009cff00a2ff00a8ff00aeff00b4ff00baff00c0ff00c6ff00ccff00d2ff00d8ff00fef000feea00fee400fede' +
+    '00fed800fed200fecc00fec600fec000feba00feb400feae00fea800fea200fe9c00fe9600fe9000fe8a00fe8400fe7e00fe7800fe7200fe6c00fe66' +
+    '00fe6000fe5a00fe5400fe4e00fe4800fe4200fe3c00fe3600fe3000fe2a00fe2400fe1e00fe1800fe1200fe0c00fe0600fe0006fe000cfe0012fe00' +
+    '18fe001efe0024fe002afe0030fe0036fe003cfe0042fe0048fe004efe0054fe005afe0060fe0066fe006cfe0072fe0078fe007efe0084fe008afe00' +
+    '90fe0096fe009cfe00a2fe00a8fe00aefe00b4fe00bafe00c0fe00c6fe00ccfe00d2fe00d8fe00defe00e4fe00eaf000feea00fee400fede00fed800' +
+    'fed200fecc00fec600fec000feba00feb400feae00fea800fea200fe9c00fe9600fe9000fe8a00fe8400fe7e00fe7800fe7200fe6c00fe6600fe6000' +
+    'fe5a00fe5400fe4e00fe4800fe4200fe3c00fe3600fe3000fe2a00fe2400fe1e00fe1800fe1200fe0c00fe0600fe0000fe0000fe0000fe0000fe0000' +
+    'fe0006fe000cfe0012fe0018fe001efe0024fe002afe0030fe0036fe003cfe0042fe0048fe004efe0054fe005afe0060fe0066fe006cfe0072fe0078' +
+    'fe007efe0084fe008afe0090fe0096fe009cfe00a2fe00a8fe00aefe00b4fe00bafe00c0fe00c6fe00ccfe00d2fe00fefe04fefe08fefe0cfefe10fe' +
+    'fe14fefe18fefe1cfefe20fefe24fefe28fefe2cfefe30fefe34fefe38fefe3cfefe40fefe44fefe48fefe4cfefe50fefe54fefe58fefe5cfefe60fe' +
+    'fe64fefe68fefe6cfefe70fefe74fefe78fefe7cfefe80fefe84fefe88fefe8cfefe90fefe94fefe98fefe9cfefea0fefea4fefea8fefeacfefeb0fe' +
+    'feb4fefeb8fefebcfefec0fefec4fefec8fefeccfefed0fefed4fefed8fefedcfefee0fefee4fefee8fe';
+  const RAIN_MM = new Map();
+  for (let i = 1; i <= 254; i++) {
+    const key = parseInt(RAIN_LUT_HEX.substr((i - 1) * 6, 6), 16);
+    const mm = i <= 100 ? 0.25 * i : i <= 180 ? 25 + 1.25 * (i - 100) : 125 + 5 * (i - 180);
+    if (!RAIN_MM.has(key)) RAIN_MM.set(key, mm);
+  }
+  RAIN_MM.set(0x000000, 0.5);    // indices 1-3 (< 1 mm) share black
+  RAIN_MM.set(0xfe0000, 97.5);   // indices 156-160 (95-100 mm) share one red
+  const RAIN_MISSING = 0x909090; // "Missing" in the IEM table
+  // The tile renderer also uses three extra dark blues for trace amounts below 1 mm.
+  [0x0006ff, 0x000cff, 0x0012ff].forEach(k => RAIN_MM.set(k, 0.5));
+
+  // Display classes in inches: [lower bound, color, label]
+  const RAIN_CLASSES = [
+    [0.25, '#fff3b0', '0.25 – 0.5'],
+    [0.5,  '#ffd66e', '0.5 – 1'],
+    [1,    '#fdae4b', '1 – 2'],
+    [2,    '#f67f3c', '2 – 3'],
+    [3,    '#e5503a', '3 – 4'],
+    [4,    '#c9284f', '4 – 6'],
+    [6,    '#a3136b', '6 – 8'],
+    [8,    '#7d0f86', '8 – 10'],
+    [10,   '#56129a', '10 – 15'],
+    [15,   '#2b0a78', '15 or more']
+  ];
+  const RAIN_RGB = RAIN_CLASSES.map(c => [parseInt(c[1].slice(1, 3), 16), parseInt(c[1].slice(3, 5), 16), parseInt(c[1].slice(5, 7), 16)]);
+  const rainLegend = document.getElementById('rain-legend');
+  RAIN_CLASSES.slice().reverse().forEach(([, color, label]) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="swatch" style="background:' + color + '"></span><span>' + label + ' in</span>';
+    rainLegend.appendChild(li);
+  });
+  const missLi = document.createElement('li');
+  missLi.innerHTML = '<span class="swatch" style="background:#9a9a9a"></span><span>No radar data</span>';
+  rainLegend.appendChild(missLi);
+
+  function loadImage(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Tile failed: ' + url));
+      img.src = url;
+    });
+  }
+
+  const RAIN_NATIVE_ZOOM = 10;   // ~150 m tile pixels, finer than the 1 km MRMS grid
+  const rainCache = new Map();    // "z/x/y" -> { inches: Float32Array, capped: Uint8Array }
+
+  const RainLayer = L.GridLayer.extend({
+    createTile: function (coords, done) {
+      const size = this.getTileSize();
+      const canvas = L.DomUtil.create('canvas', 'leaflet-tile');
+      canvas.width = size.x; canvas.height = size.y;
+      const path = coords.z + '/' + coords.x + '/' + coords.y;
+      Promise.all(RAIN_PARTS.map(p => loadImage(IEM_TILES + p + '/' + path + '.png')))
+        .then(imgs => {
+          const w = size.x, h = size.y, n = w * h;
+          const scratch = document.createElement('canvas');
+          scratch.width = w; scratch.height = h;
+          const sctx = scratch.getContext('2d', { willReadFrequently: true });
+          const mm = new Float32Array(n), missing = new Uint8Array(n), capped = new Uint8Array(n);
+          for (const img of imgs) {
+            sctx.clearRect(0, 0, w, h);
+            sctx.drawImage(img, 0, 0, w, h);
+            const d = sctx.getImageData(0, 0, w, h).data;
+            for (let p = 0, k = 0; p < n; p++, k += 4) {
+              if (d[k + 3] === 0) continue;                       // transparent = no rain
+              const key = (d[k] << 16) | (d[k + 1] << 8) | d[k + 2];
+              if (key === RAIN_MISSING) { missing[p] = 1; continue; }
+              const v = RAIN_MM.get(key);
+              if (v === undefined) continue;                      // unknown color: treat as no rain
+              if (v >= RAIN_CAP_MM) capped[p] = 1;
+              mm[p] += v;
+            }
+          }
+          const ctx = canvas.getContext('2d');
+          const out = ctx.createImageData(w, h), o = out.data;
+          const inches = new Float32Array(n);
+          for (let p = 0, k = 0; p < n; p++, k += 4) {
+            if (missing[p]) { o[k] = o[k + 1] = o[k + 2] = 154; o[k + 3] = 170; inches[p] = NaN; continue; }
+            const inch = mm[p] / 25.4;
+            inches[p] = inch;
+            let c = -1;
+            for (let i = RAIN_CLASSES.length - 1; i >= 0; i--) if (inch >= RAIN_CLASSES[i][0]) { c = i; break; }
+            if (c < 0) continue;
+            o[k] = RAIN_RGB[c][0]; o[k + 1] = RAIN_RGB[c][1]; o[k + 2] = RAIN_RGB[c][2]; o[k + 3] = 255;
+          }
+          ctx.putImageData(out, 0, 0);
+          rainCache.set(path, { inches, capped });
+          done(null, canvas);
+        })
+        .catch(err => done(err, canvas));
+      return canvas;
+    }
+  });
+  const rain = new RainLayer({
+    pane: 'rain', opacity: 0.5, maxNativeZoom: RAIN_NATIVE_ZOOM, maxZoom: 18,
+    attribution: 'Rainfall: NWS MRMS QPE via <a href="https://mesonet.agron.iastate.edu/">Iowa Environmental Mesonet</a>'
+  });
+  rain.on('tileunload', e => rainCache.delete(e.coords.z + '/' + e.coords.x + '/' + e.coords.y));
+  watchTiles(rain, 'rain', 'Edouard storm total rainfall (MRMS via IEM)');
+
+  const rainSlider = document.getElementById('rain-opacity');
+  const rainSliderOut = document.getElementById('rain-opacity-out');
+  rainSlider.addEventListener('input', () => {
+    rain.setOpacity(rainSlider.value / 100);
+    rainSliderOut.textContent = rainSlider.value + '%';
+  });
+
+  // Rainfall readout under the pointer (or at a tap on touch screens)
+  const RainReadout = L.Control.extend({
+    options: { position: 'bottomright' },
+    onAdd: function () {
+      this._div = L.DomUtil.create('div', 'rain-readout');
+      L.DomEvent.disableClickPropagation(this._div);
+      this.clear();
+      return this._div;
+    },
+    clear: function () {
+      this._div.innerHTML = '<small>Edouard storm total</small>Point at the map to read rainfall';
+    },
+    show: function (text) {
+      this._div.innerHTML = '<small>Edouard storm total (MRMS)</small>' + text;
+    }
+  });
+  const readout = new RainReadout();
+
+  function rainAt(latlng) {
+    const z = Math.min(Math.round(map.getZoom()), RAIN_NATIVE_ZOOM);
+    const pt = map.project(latlng, z);
+    const tx = Math.floor(pt.x / 256), ty = Math.floor(pt.y / 256);
+    const entry = rainCache.get(z + '/' + tx + '/' + ty);
+    if (!entry) return undefined;
+    const px = Math.min(255, Math.floor(pt.x - tx * 256)), py = Math.min(255, Math.floor(pt.y - ty * 256));
+    const p = py * 256 + px;
+    return { inches: entry.inches[p], capped: entry.capped[p] === 1 };
+  }
+  function updateReadout(e) {
+    if (!map.hasLayer(rain)) return;
+    const v = rainAt(e.latlng);
+    if (v === undefined) readout.show('loading…');
+    else if (isNaN(v.inches)) readout.show('no radar data here');
+    else readout.show('<b>' + (v.capped ? 'at least ' : '') + v.inches.toFixed(2) + ' in</b>' +
+      (v.capped ? '<small>at the 19.5 in archive limit</small>' : ''));
+  }
+  map.on('mousemove click', updateReadout);
+  map.on('mouseout', () => { if (map.hasLayer(rain)) readout.clear(); });
+  rain.on('add', () => readout.addTo(map));
+  rain.on('remove', () => readout.remove());
+
+  // ---------- NHD rivers and streams ----------
+  // The dynamic export endpoint (nhd/MapServer/export) renders on demand: it returns 502s and times
+  // out when a browser asks for a screenful at once, and its two flowline layers swap at 1:73,220,
+  // which made coverage look patchy from tile to tile. USGSHydroCached serves the same National
+  // Hydrography Dataset as a pre-rendered cartographic overlay, cached to zoom 23 — one consistent
+  // style at every zoom, and no rate limiting.
+  const nhd = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSHydroCached/MapServer/tile/{z}/{y}/{x}', {
+    pane: 'nhd', maxZoom: 18, maxNativeZoom: 16, opacity: 0.9,
+    attribution: 'Hydrography: <a href="https://www.usgs.gov/national-hydrography">USGS NHD</a>'
+  });
+  watchTiles(nhd, 'nhd', 'Rivers & streams (USGS NHD)');
+
+
+  // ---------- County boundaries (Census TIGERweb) ----------
+  const counties = L.layerGroup();
+  (async function loadCounties() {
+    setStatus('counties', 'loading', 'loading…');
+    const url = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1/query?' +
+      new URLSearchParams({
+        where: "STATE='48' AND COUNTY IN ('199','245','361','457','373')",   // Hardin, Jefferson, Orange, Tyler, Polk
+        outFields: 'NAME,BASENAME,GEOID,INTPTLAT,INTPTLON',
+        returnGeometry: 'true', outSR: '4326', geometryPrecision: '5', maxAllowableOffset: '0.0003',
+        f: 'geojson'
+      });
+    try {
+      const gj = await fetchJSON(url);
+      if (!gj.features || gj.features.length === 0) throw new Error('The query returned no county features.');
+      const poly = L.geoJSON(gj, {
+        pane: 'counties',
+        style: { color: '#1b1b1b', weight: 2.5, opacity: 0.9, fill: false, dashArray: '8 4' },
+        onEachFeature: (f, lyr) => lyr.bindPopup('<h3></h3>GEOID ' + f.properties.GEOID)
+          .on('popupopen', e => { e.popup.getElement().querySelector('h3').textContent = f.properties.NAME + ', Texas'; })
+      });
+      counties.addLayer(poly);
+      gj.features.forEach(f => {
+        const p = f.properties;
+        const lat = parseFloat(p.INTPTLAT), lon = parseFloat(p.INTPTLON);
+        const at = isFinite(lat) && isFinite(lon) ? [lat, lon] : L.geoJSON(f).getBounds().getCenter();
+        counties.addLayer(L.tooltip({ permanent: true, direction: 'center', className: 'county-label', pane: 'countyLabels' })
+          .setLatLng(at).setContent((p.BASENAME || p.NAME).replace(/ County$/, '') + ' Co.'));
+      });
+      if (gj.features.length < 5) {
+        reportError('counties-partial', 'County boundaries incomplete', 'Only ' + gj.features.length + ' of 5 counties were returned.');
+      }
+      homeBounds = poly.getBounds();
+      fitHome();
+      setStatus('counties', 'ok', 'loaded');
+    } catch (e) {
+      setStatus('counties', 'err', 'error');
+      reportError('counties', 'County boundaries failed to load', e.message);
+    }
+  })();
+
+  // ---------- Big Thicket National Preserve (NPS) ----------
+  const bith = L.layerGroup();
+  (async function loadBigThicket() {
+    setStatus('bith', 'loading', 'loading…');
+    const url = 'https://services1.arcgis.com/fBc8EJBxQRMcHlei/arcgis/rest/services/' +
+      'NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2/query?' +
+      new URLSearchParams({
+        where: "UNIT_CODE='BITH'", outFields: 'UNIT_NAME,UNIT_CODE',
+        returnGeometry: 'true', outSR: '4326', geometryPrecision: '5', f: 'geojson'
+      });
+    try {
+      const gj = await fetchJSON(url);
+      if (!gj.features || gj.features.length === 0) throw new Error('The NPS service returned no features for BITH.');
+      bith.addLayer(L.geoJSON(gj, {
+        pane: 'bith',
+        style: { color: '#00501e', weight: 2, opacity: 1, fillColor: '#005a1e', fillOpacity: 0.25 },
+        onEachFeature: (f, lyr) => lyr.bindPopup('<h3>Big Thicket National Preserve</h3>National Park Service unit BITH<br>' +
+          '<a href="https://www.nps.gov/bith/" target="_blank" rel="noopener">nps.gov/bith</a>')
+      }));
+      setStatus('bith', 'ok', 'loaded');
+    } catch (e) {
+      setStatus('bith', 'err', 'error');
+      reportError('bith', 'Big Thicket National Preserve failed to load', e.message);
+    }
+  })();
+
+  // ---------- Gauge KOUT2 ----------
+  // Location from USGS site 08041500 (Village Ck nr Kountze, TX), NAD83; NOAA lists the same site as KOUT2.
+  const GAUGE = { lid: 'KOUT2', usgs: '08041500', name: 'Village Creek near Kountze, TX', lat: 30.3979862, lon: -94.2635215 };
+  const gaugeMarker = L.marker([GAUGE.lat, GAUGE.lon], {
+    icon: L.divIcon({ className: '', html: '<div class="gauge-icon"></div>', iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -12] }),
+    title: 'KOUT2 – Village Creek near Kountze',
+    zIndexOffset: 1000
+  }).bindTooltip('KOUT2', { permanent: true, direction: 'right', offset: [12, 0], className: 'gauge-label' });
+  const gauge = L.layerGroup([gaugeMarker]);
+
+  function gaugePopup(extra) {
+    return '<h3>Village Creek near Kountze</h3>' +
+      '<table><tr><td>NWS ID</td><td>' + GAUGE.lid + '</td></tr>' +
+      '<tr><td>USGS site</td><td>' + GAUGE.usgs + '</td></tr>' +
+      '<tr><td>Location</td><td>' + GAUGE.lat.toFixed(5) + ', ' + GAUGE.lon.toFixed(5) + '</td></tr>' +
+      (extra || '') + '</table>' +
+      '<a href="https://water.noaa.gov/gauges/kout2" target="_blank" rel="noopener">NOAA hydrograph</a> · ' +
+      '<a href="https://waterdata.usgs.gov/monitoring-location/' + GAUGE.usgs + '/" target="_blank" rel="noopener">USGS data</a>';
+  }
+  gaugeMarker.bindPopup(gaugePopup('<tr><td>Latest</td><td>loading…</td></tr>'));
+
+  (async function loadGaugeStatus() {
+    setStatus('gauge', 'loading', 'loading…');
+    try {
+      const g = await fetchJSON('https://api.water.noaa.gov/nwps/v1/gauges/' + GAUGE.lid);
+      const obs = g.status && g.status.observed;
+      const fc = g.flood && g.flood.categories;
+      let rows = '';
+      if (obs && obs.primary != null && obs.primary > -999) {
+        const when = new Date(obs.validTime);
+        rows += '<tr><td>Stage</td><td>' + obs.primary + ' ' + obs.primaryUnit + '</td></tr>';
+        if (obs.secondary != null && obs.secondary > -999)
+          rows += '<tr><td>Flow</td><td>' + Math.round(obs.secondary * (obs.secondaryUnit === 'kcfs' ? 1000 : 1)).toLocaleString() + ' cfs</td></tr>';
+        rows += '<tr><td>Status</td><td>' + String(obs.floodCategory || '').replace(/_/g, ' ') + '</td></tr>';
+        rows += '<tr><td>Observed</td><td>' + (isNaN(when) ? obs.validTime : when.toLocaleString()) + '</td></tr>';
+      } else {
+        rows += '<tr><td>Latest</td><td>no current observation</td></tr>';
+      }
+      if (fc && fc.minor) {
+        rows += '<tr><td>Flood stages</td><td>Action ' + fc.action.stage + ' · Minor ' + fc.minor.stage +
+          ' · Moderate ' + fc.moderate.stage + ' · Major ' + fc.major.stage + ' ft</td></tr>';
+      }
+      gaugeMarker.setPopupContent(gaugePopup(rows));
+      setStatus('gauge', 'ok', 'live');
+    } catch (e) {
+      gaugeMarker.setPopupContent(gaugePopup('<tr><td>Latest</td><td>unavailable</td></tr>'));
+      setStatus('gauge', 'err', 'no live data');
+      reportError('gauge', 'Gauge KOUT2: live reading failed to load',
+        'The marker is placed from USGS site coordinates, but current stage could not be fetched from NOAA (' + e.message + ').');
+    }
+  })();
+
+  // ---------- NWS gauge storm totals (final post-storm datasets) ----------
+  // Two NWS offices cover these counties, so the totals come from both post-storm reports:
+  //   Hardin, Jefferson, Orange, Tyler -> WFO Lake Charles, issued 2:10 PM CDT Sep 8 2026
+  //     (PSHLCH / 202609081910-KLCH-ACUS74-PSHLCH), PSHLCH_2026AL05_Edouard_Rainfall.csv
+  //   Polk -> WFO Houston/Galveston, issued 11:45 AM CDT Sep 4 2026
+  //     (PSHHGX / 202609041645-KHGX-ACUS74-PSHHGX), PSHHGX_2026AL05_Edouard_Rainfall.csv
+  // All full storm totals; both files flag incomplete or estimated values and none of these
+  // 128 stations carries a flag.
+  // [county initial, site name, inches, observing network, lat, lon]
+  const COUNTY_NAMES = { H: 'Hardin', J: 'Jefferson', O: 'Orange', T: 'Tyler', P: 'Polk' };
+  const GAUGE_TOTALS = [
+    ["H","LITTLE PINE ISLAND BOYOU @ S.H. 787",24.36,"JCDD6",30.3486,-94.5881],
+    ["T","SOUTHERN ROUGH",17.84,"RAWS",30.5447,-94.3461],
+    ["T","GW3384 WARREN",16.84,"APRSWXNET/CWOP",30.6079,-94.4014],
+    ["H","Kountze 2.4 W",13.89,"CoCoRaHS",30.375,-94.355],
+    ["T","Woodville 6.1 S",10.25,"CoCoRaHS",30.6858,-94.4164],
+    ["T","WOODVILLE",10.08,"RAWS",30.7369,-94.4325],
+    ["P","15 SSW Chester",9.61,"AWS",30.7139,-94.6731],
+    ["P","4 ENE Goodrich",9.45,"AWS",30.6408,-94.8697],
+    ["J","WFT36501",8.76,"TEMPEST",30.0841,-94.1843],
+    ["J","LANDIS DRIVE @ DITCH 202B",8.59,"JCDD6",30.0675,-94.1989],
+    ["T","Fred 3.1 WSW",8.39,"CoCoRaHS",30.5608,-94.2241],
+    ["J","FRINT ROAD @ WILLOW MARSH BAYOU",8.33,"JCDD6",30.0022,-94.1553],
+    ["H","PINE ISLAND BAYOU @ S.H. 105",8.27,"JCDD6",30.2569,-94.5683],
+    ["P","Livingston 3.9 SSE",8.18,"COCORAHS",30.6571,-94.9109],
+    ["J","WFT23572",8.11,"TEMPEST",30.08,-94.1586],
+    ["T","Colmesneil 0.9 S",8.09,"CoCoRaHS",30.8961,-94.424],
+    ["J","TYRRELL PARK DETENTION @ PHELPS ROAD",8.01,"JCDD6",30.0217,-94.1603],
+    ["H","BLACK CREEK @ S.H. 326",7.88,"JCDD6",30.2551,-94.3649],
+    ["T","Colmesneil 0.5 E",7.85,"CoCoRaHS",30.9104,-94.4144],
+    ["J","WFT38413",7.81,"TEMPEST",30.1424,-94.2497],
+    ["J","State Highway124 at Hillebrandt Bayou Ditch 100",7.58,"JCDD6",30.0358,-94.1489],
+    ["J","EAST LANE @ DITCH 200",7.46,"JCDD6",30.0581,-94.2136],
+    ["J","Beaumont 3.3 SW",7.34,"CoCoRaHS",30.0527,-94.182],
+    ["J","Intersection of D. 100-A",7.29,"JCDD6",30.0793,-94.1408],
+    ["T","Woodville 6.1 W (Smith)",7.1,"CoCoRaHS",30.7756,-94.5188],
+    ["J","HILLEBRANDT BAYOU @ HILLEBRANDT RD BRIDGE",6.98,"JCDD6",29.9283,-94.1106],
+    ["J","WASHINGTON BLVD @ CALDWELL CUTOFF",6.98,"JCDD6",30.0561,-94.1572],
+    ["J","HEBERT HEIRS MARSH DITCH 551-G",6.86,"JCDD6",29.8514,-94.0739],
+    ["P","CORRIGAN",6.85,"CWOP",31.045,-94.8238],
+    ["J","Beaumont 2.8 W",6.82,"CoCoRaHS",30.0829,-94.1903],
+    ["J","Tram Rd and Ditch 1202 A",6.71,"JCDD6",30.1524,-94.2471],
+    ["H","PINE ISLAND BAYOU @ S.H. 105",6.69,"JCDD6",30.1353,-94.2794],
+    ["T","WFT82504",6.62,"TEMPEST",30.8226,-94.5345],
+    ["J","GULF TERRACE SCREW GATES",6.58,"JCDD6",30.0812,-94.2032],
+    ["P","Livingston 8.4 W",6.52,"COCORAHS",30.6984,-95.0765],
+    ["H","WFT36431",6.44,"TEMPEST",30.2529,-94.2096],
+    ["J","LABELLE ROAD @ TAYLOR BAYOU",6.4,"JCDD6",29.8747,-94.1594],
+    ["T","Woodville 8.8 WNW",6.18,"CoCoRaHS",30.8047,-94.5668],
+    ["J","COTTON CREEK @ GRAYBURG ROAD",6.07,"JCDD6",30.0428,-94.425],
+    ["J","Beaumont 0.8 NNE",5.95,"CoCoRaHS",30.0987,-94.1387],
+    ["J","GLADYS AVE @ HILLEBRANT BAYOU DITCH 100",5.94,"JCDD6",30.0936,-94.1647],
+    ["J","LABELLE ROAD @ PEVITOT BAYOU",5.82,"JCDD6",29.9647,-94.1653],
+    ["T","Landram Ranch",5.71,"TWDB",31.0397,-94.5302],
+    ["T","Colmesneil 11.6 ESE",5.67,"CoCoRaHS",30.8571,-94.2367],
+    ["J","DOWDEL BASIN SCREW GATES NEAR BEAUMONT 4NW",5.66,"HADS",30.1032,-94.182],
+    ["J","Beaumont 4.8 NNW",5.56,"CoCoRaHS",30.1532,-94.1697],
+    ["J","Concord at Ditch 001",5.46,"JCDD6",30.1297,-94.1569],
+    ["J","SOUTH 8TH ST @ DITCH 110",5.36,"JCDD6",30.0578,-94.1236],
+    ["H","Lumberton 1.2 WNW",5.33,"CoCoRaHS",30.272,-94.2201],
+    ["H","Lumberton 0.7 ENE",5.21,"CoCoRaHS",30.2683,-94.1915],
+    ["J","OLD WALMART BASIN",5.17,"JCDD6",30.1111,-94.146],
+    ["T","Spurger 6.2 S",5.07,"CoCoRaHS",30.6021,-94.1673],
+    ["J","BOONDOCKS RD. @ TAYLORS BAYOU SOUTH FORK",5.06,"JCDD6",29.8464,-94.2264],
+    ["T","DW3611 WOODVILLE",5.02,"APRSWXNET/CWOP",30.8682,-94.4956],
+    ["J","Mayhaw Bayou at Wilber Road",5.01,"JCDD6",29.8075,-94.2619],
+    ["J","Tram Road at Walker Ditch-1000",4.96,"JCDD6",30.1642,-94.2128],
+    ["J","Beaumont 1.2 NW",4.94,"CoCoRaHS",30.1006,-94.1573],
+    ["J","Nederland 1.8 W",4.93,"CoCoRaHS",29.9665,-94.0251],
+    ["J","GIWW @ SALT BAYOU OUTFALL",4.9,"JCDD6",29.7928,-94.0096],
+    ["J","PLANT ROAD @ DITCH 903",4.88,"JCDD6",30.1469,-94.1686],
+    ["J","PINE ISLAND BAYOU NEAR SOUR LAKE 5SE",4.75,"HADS",30.1058,-94.3344],
+    ["J","MOORE RD. DETENTION POND",4.71,"JCDD6",30.0975,-94.2728],
+    ["J","S. H. 326 @ PINE ISLAND BAYOU",4.71,"JCDD6",30.0925,-94.4028],
+    ["J","PINE ISLAND BAYOU ABOVE BI PUMP PLANT NEAR BEAUMONT 5N",4.69,"HADS",30.1786,-94.1886],
+    ["J","PORT ACRES SPORTSMAN @ MARSH DITCH 551-C",4.68,"JCDD6",29.8367,-94.0914],
+    ["J","Port Arthur-Southeast Texas Regional Airport",4.63,"ASOS",29.95,-94.0167],
+    ["J","SOUTH 11TH STREET DETENTION POND",4.55,"JCDD6",30.0473,-94.1392],
+    ["J","T.P.W.D. Boat Ramp in J.D. Murphree at Ditch 500",4.51,"JCDD6",29.8856,-94.0346],
+    ["J","DITCH ON WALDON ROAD",4.4,"JCDD6",30.0379,-94.2549],
+    ["H","Silsbee 7.5 NNE",4,"CoCoRaHS",30.4367,-94.1149],
+    ["J","BEAUMONT",3.95,"SCAN",30.0684,-94.2928],
+    ["J","WFT75562",3.9,"TEMPEST",29.9799,-94.0013],
+    ["J","TAYLORS BAYOU @ NEEDMORE WINDOWS",3.88,"JCDD6",29.8548,-94.1874],
+    ["H","Lumberton 3.3 S",3.86,"CoCoRaHS",30.2174,-94.2067],
+    ["J","DOWNTOWN BEAUMONT @ NECHES RIVER",3.85,"JCDD6",30.0868,-94.0957],
+    ["J","HIGHLAND AVE @ DITCH 104",3.84,"JCDD6",30.0319,-94.0833],
+    ["J","MCFADDIN",3.84,"RAWS",29.7072,-94.1211],
+    ["J","KIDD ROAD @ DITCH 406B",3.78,"JCDD6",29.9945,-94.2391],
+    ["J","LAWHON DETENTION POND @ DITCH 400",3.78,"JCDD6",30.0066,-94.2551],
+    ["J","LAWHON ROAD @ GREEN POND ROAD",3.78,"JCDD6",30.0003,-94.2991],
+    ["J","Beaumont 13.1 SSW",3.65,"CoCoRaHS",29.9244,-94.2569],
+    ["J","NRCS BEEHIVE HWY 365 @ DEERCAMP RD.",3.64,"JCDD6",29.9353,-94.2991],
+    ["J","EAST LUCAS @DITCH 002",3.63,"JCDD6",30.1256,-94.1197],
+    ["J","SOUTH CHINA ROAD @ DITCH 800",3.58,"JCDD6",29.9583,-94.346],
+    ["J","Nederland 0.5 SSE",3.57,"CoCoRaHS",29.9635,-93.9942],
+    ["O","Lakeview 0.3 NE",3.56,"CoCoRaHS",30.2235,-94.1062],
+    ["H","CW4340 Silsbee",3.51,"APRSWXNET/CWOP",30.3828,-94.1667],
+    ["P","1.4 W Livingston",3.46,"HADS",30.7161,-94.9586],
+    ["J","STATE HWY 365 AT GREEN POND GULLY",3.43,"JCDD6",29.9453,-94.3261],
+    ["J","CATTLE WALK @ DITCH 550",3.39,"JCDD6",29.7658,-94.0978],
+    ["J","GREEN ACRES SCREW GATE",3.35,"JCDD6",29.9322,-94.2442],
+    ["J","SABINE RANCH @ DITCH 550",3.32,"JCDD6",29.7658,-94.1739],
+    ["T","Hillister 7.7 E",3.24,"CoCoRaHS",30.6854,-94.2567],
+    ["J","SOUTH CHINA ROAD @ PINE TREE DITCH 601",3.21,"JCDD6",29.9723,-94.3374],
+    ["P","4.2 W Goodrich (RR)",3.2,"HADS",30.6333,-95.01],
+    ["J","F.M. 1406 @ NORTH FORK TAYLOR BAYOU",3.1,"JCDD6",29.9478,-94.4003],
+    ["J","WFT66895",3.09,"TEMPEST",29.9489,-93.976],
+    ["J","MAHAW BAYOU @ BRUSH ISLAND ROAD",3.06,"JCDD6",29.8539,-94.3508],
+    ["O","COW BAYOU AT FM 1442 NR ORANGEFIELD 3NW",3.03,"HADS",30.1078,-93.8961],
+    ["J","Nederland 1.2 NW",3.02,"CoCoRaHS",29.9853,-94.008],
+    ["J","SOUTH CHINA R.D @ DITCH 608",3.01,"JCDD6",30.0258,-94.3344],
+    ["J","NEEDMORE DIVERSION SALTWATER BARRIER @ DITCH 8001",2.88,"JCDD6",29.691,-94.1709],
+    ["J","MAHAW BAYOU @ ENGLIN RD",2.84,"JCDD6",29.7933,-94.3286],
+    ["J","GIWW @ S. H. 87 BRIDGE",2.78,"JCDD6",29.8242,-93.9653],
+    ["J","STAR LAKE @ GIWW",2.71,"JCDD6",29.6892,-94.1581],
+    ["J","WFT55926",2.69,"TEMPEST",30.1311,-94.1965],
+    ["O","COW BAYOU NEAR MAURICEVILLE 2SW",2.68,"HADS",30.1861,-93.9083],
+    ["O","WFT32488",2.68,"TEMPEST",30.1371,-93.8467],
+    ["J","PIPKIN RANCH @ WILLOW SLOUGH DITCH 550",2.52,"JCDD6",29.7678,-94.1969],
+    ["O","Bridge City 1.3 NW",2.3,"CoCoRaHS",30.0428,-93.8675],
+    ["O","SABINE RIVER AT INTL PAPER NEAR ORANGE",2.27,"HADS",30.1997,-93.7183],
+    ["T","Neches Rv nr Rockland",2.19,"USGS HYDRO",31.025,-94.3994],
+    ["J","Port Neches 0.9 NE",2.16,"CoCoRaHS",29.984,-93.9313],
+    ["H","Navstar_Marine",2.15,"EARTH-NETWORKS",30.2653,-94.2019],
+    ["O","Orange 9.2 WSW",2.09,"CoCoRaHS",30.0466,-93.8964],
+    ["J","MAYHAW BAYOU @ DIVERSON @ STRUCTURE FORK (BRIDGE)",2.09,"JCDD6",29.7517,-94.3444],
+    ["P","Livingston",1.97,"CWOP",30.6818,-95.0363],
+    ["J","EGS Port Neches Weather",1.79,"EARTH-NETWORKS",29.9844,-93.9619],
+    ["J","RM",1.56,"EARTH-NETWORKS",29.9669,-93.9575],
+    ["O","COW BAYOU AT SH 87 NR BRIDGE CITY",1.52,"HADS",30.0444,-93.8214],
+    ["O","SABINE RIVER NEAR ORANGE",1.47,"HADS",30.0978,-93.7214],
+    ["H","VILLAGE CREEK NEAR KOUNTZE 4NE",1.37,"HADS",30.3978,-94.2633],
+    ["O","Orange County Airport",1.36,"AWOS",30.0692,-93.8036],
+    ["T","Rain Gage nr Colmesneil",1.35,"USGS HYDRO",30.8767,-94.3113],
+    ["J","Keith Lake Public Boat Launch at Highway 87",1.24,"JCDD6",29.772,-93.9497],
+    ["J","Beaumont 0.3 E",1.2,"CoCoRaHS",30.0874,-94.1389],
+    ["J","CRAIGEN ROAD @ TAYLORS BAYOU DITCH 500",1.09,"JCDD6",29.8806,-94.2571],
+    ["J","FW9386 Taylor Landing",1.05,"APRSWXNET/CWOP",29.8708,-94.1403]
+  ];
+  const PNS_URL = 'https://www.weather.gov/lch/TropicalEventSummary';
+
+  function rainClassColor(inches) {
+    for (let i = RAIN_CLASSES.length - 1; i >= 0; i--) if (inches >= RAIN_CLASSES[i][0]) return RAIN_CLASSES[i][1];
+    return '#ffffff';
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  }
+
+  const totals = L.layerGroup();
+  // Draw smaller totals first so the largest sit on top where points overlap.
+  GAUGE_TOTALS.slice().sort((a, b) => a[2] - b[2]).forEach(([c, name, inches, network, lat, lon]) => {
+    const marker = L.circleMarker([lat, lon], {
+      pane: 'totals', radius: 5.5, weight: 1,
+      color: '#2a2a2a', opacity: 0.85, fillColor: rainClassColor(inches), fillOpacity: 1
+    });
+    marker.bindTooltip(inches.toFixed(2), {
+      permanent: true, direction: 'right', offset: [7, 0], className: 'total-label', pane: 'totals'
+    });
+    marker.bindPopup(() => {
+      const radar = rainAt(L.latLng(lat, lon));
+      const radarText = !map.hasLayer(rain) ? 'turn on the rainfall layer to compare'
+        : radar === undefined ? 'pan here with the rainfall layer on to compare'
+        : isNaN(radar.inches) ? 'no radar data'
+        : (radar.capped ? 'at least ' : '') + radar.inches.toFixed(2) + ' in';
+      return '<h3>' + escapeHtml(name) + '</h3>' +
+        '<table><tr><td>County</td><td>' + COUNTY_NAMES[c] + ', TX</td></tr>' +
+        '<tr><td>Storm total</td><td><b>' + inches.toFixed(2) + ' in</b></td></tr>' +
+        '<tr><td>Network</td><td>' + escapeHtml(network) + '</td></tr>' +
+        '<tr><td>MRMS radar</td><td>' + radarText + '</td></tr></table>' +
+        '<a href="' + PNS_URL + '" target="_blank" rel="noopener">NWS post-storm report</a>';
+    });
+    totals.addLayer(marker);
+  });
+  const TOTAL_LABEL_ZOOM = 10;
+  function syncTotalLabels() {
+    map.getContainer().classList.toggle('hide-total-labels', map.getZoom() < TOTAL_LABEL_ZOOM);
+  }
+  map.on('zoomend', syncTotalLabels);
+  syncTotalLabels();
+  setStatus('totals', 'ok', GAUGE_TOTALS.length + ' reports');
+
+  // ---------- Layer checkboxes ----------
+  const overlays = { nlcd, rain, nhd, bith, counties, gauge, totals };
+  const statusOnHide = new Set(['nlcd', 'nhd', 'rain']);   // tile layers: status only meaningful while shown
+  document.querySelectorAll('input[data-layer]').forEach(cb => {
+    const key = cb.dataset.layer, layer = overlays[key];
+    const apply = () => {
+      if (cb.checked) { layer.addTo(map); }
+      else {
+        map.removeLayer(layer);
+        if (statusOnHide.has(key)) { setStatus(key, '', 'off'); clearError(key); }
+      }
+      if (key === 'nlcd') slider.disabled = !cb.checked;
+      if (key === 'rain') rainSlider.disabled = !cb.checked;
+    };
+    cb.addEventListener('change', apply);
+    apply();
+  });
+
+  document.getElementById('reset-view').addEventListener('click', () => {
+    fitted = false;
+    if (!fitHome()) map.fitBounds(homeBounds);
+  });
+
+  // ---------- Panel collapse ----------
+  const panel = document.getElementById('panel');
+  const toggleBtn = document.getElementById('toggle-panel');
+  toggleBtn.addEventListener('click', () => {
+    const collapsed = panel.classList.toggle('collapsed');
+    toggleBtn.textContent = collapsed ? 'Show' : 'Hide';
+    toggleBtn.setAttribute('aria-expanded', String(!collapsed));
+  });
+  if (window.matchMedia('(max-width: 640px)').matches) toggleBtn.click();
+})();
+</script>
+</body>
+</html>
